@@ -2,7 +2,10 @@ package com.skillsup.lockfree.list;
 
 import java.util.AbstractList;
 
-
+/**
+ * http://pirkelbauer.com/slides/opodis06.pdf
+ * @param <E>
+ */
 public class LockFreeList<E> extends AbstractList<E>{
 
 

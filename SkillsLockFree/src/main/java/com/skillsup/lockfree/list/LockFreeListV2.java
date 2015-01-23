@@ -4,16 +4,15 @@ import java.util.AbstractList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-public class LockFreeList<E> extends AbstractList<E> {
+public class LockFreeListV2<E> extends AbstractList<E> {
 
 	private AtomicReference<Descriptor> descriptor;
 
-	private AtomicReferenceArray[] array;
+	private AtomicReferenceArray<AtomicReferenceArray<E>> memory;
 
-	public LockFreeList() {
+	public LockFreeListV2() {
 		descriptor = new AtomicReference<>(new Descriptor(new WriteOperation(null, 0, false), 0));
-		array = new AtomicReferenceArray[32];
-		array[0] = new AtomicReferenceArray<>(2);
+		memory = new AtomicReferenceArray<>(32);
 	}
 
 	@Override
@@ -39,35 +38,45 @@ public class LockFreeList<E> extends AbstractList<E> {
 		Descriptor nextDescriptor;
 		do {
 			currentDesc = this.descriptor.get();
-			currentDesc.writeOperation.completeWrite();
-			int nextSize = currentDesc.size + 1;
-			ensureCapacity(nextSize);
-			nextDescriptor = new Descriptor(new WriteOperation(element, currentDesc.size), nextSize);
+			completeWrite(currentDesc.writeOperation);
+			int bucketNumber = getNumberOfBucket(currentDesc.size);
+			if (memory.get(bucketNumber) == null) {
+				allocBucket(bucketNumber);
+			}
+			WriteOperation writeOperation = new WriteOperation(element, currentDesc.size);
+			nextDescriptor = new Descriptor(writeOperation, currentDesc.size + 1);
 		}
 		while (!this.descriptor.compareAndSet(currentDesc, nextDescriptor));
-		nextDescriptor.writeOperation.completeWrite();
+		completeWrite(nextDescriptor.writeOperation);
 		return true;
 	}
 
 	@Override
 	public E set(int index, E newValue) {
-		E oldValue = this.get(index);
-		WriteOperation writeOperation = new WriteOperation(oldValue, newValue, index, true);
-		writeOperation.completeWrite();
-		return oldValue;
-	}
-
-	private void ensureCapacity(int minCapacity) {
-		int bucketNumber = getNumberOfBucket(minCapacity);
-		if (array[bucketNumber] == null) {
-			array[bucketNumber] = new AtomicReferenceArray<>(getBucketSize(minCapacity));
+		int size = this.size();
+		if (index >= size || index < 0) {
+			throw new IndexOutOfBoundsException("Index: " + index + ", Size: " + size);
 		}
-
+		AtomicReferenceArray<E> bucket = getBucket(index);
+		return bucket.getAndSet(getIndexInBucket(index), newValue);
 	}
 
-	private int getBucketSize(int position) {
-		int pos = position + 2;
-		return Integer.highestOneBit(pos);
+	private void allocBucket(int bucketNumber) {
+		int bucketSize = getBucketSize(bucketNumber);
+		memory.compareAndSet(bucketNumber, null, new AtomicReferenceArray<E>(bucketSize));
+	}
+
+	private void completeWrite(WriteOperation writeOperation) {
+		if (writeOperation.pending) {
+			int indexInBucket = getIndexInBucket(writeOperation.position);
+			AtomicReferenceArray<E> bucket = getBucket(writeOperation.position);
+			bucket.compareAndSet(indexInBucket, writeOperation.oldValue, writeOperation.newValue);
+			writeOperation.pending = false;
+		}
+	}
+
+	private int getBucketSize(int numberOfBucket) {
+		return 2 << numberOfBucket;
 	}
 
 	private int getIndexInBucket(int position) {
@@ -82,7 +91,7 @@ public class LockFreeList<E> extends AbstractList<E> {
 
 	private AtomicReferenceArray<E> getBucket(int position) {
 		int bucketNumber = getNumberOfBucket(position);
-		return array[bucketNumber];
+		return memory.get(bucketNumber);
 	}
 
 	private class Descriptor {
@@ -114,16 +123,6 @@ public class LockFreeList<E> extends AbstractList<E> {
 			this.oldValue = oldValue;
 			this.newValue = newValue;
 			this.position = position;
-		}
-
-		public void completeWrite() {
-			if (this.pending) {
-				int indexInBucket = getIndexInBucket(this.position);
-				AtomicReferenceArray<E> bucket = getBucket(this.position);
-				bucket.compareAndSet(indexInBucket, this.oldValue, this.newValue);
-				this.pending = false;
-			}
-
 		}
 	}
 }

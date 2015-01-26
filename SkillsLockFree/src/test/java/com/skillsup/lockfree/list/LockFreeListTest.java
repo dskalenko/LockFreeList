@@ -8,20 +8,79 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 public class LockFreeListTest {
-    private final static int SIZE = 10000;
+    private final static int SIZE = 1_000_000;
 
     @Test
-    public void testAdd() throws NoSuchFieldException, IllegalAccessException {
+    public void testAddNotNull() throws NoSuchFieldException, IllegalAccessException {
         List<String> testList = new LockFreeList<>();
         AtomicReferenceArray<AtomicReferenceArray<String>> memory = (AtomicReferenceArray<AtomicReferenceArray<String>>) getValue(testList, "memory");
         Assert.assertEquals(memory.length(), 32);
-		String testString = null;
-		for (int counter = 0; counter < 1_000_000; counter++) {
-			testString = "Test + " + counter;
-			testList.add(testString);
-			Assert.assertEquals(testString, testList.get(counter));
-			Assert.assertEquals(counter + 1, testList.size());
-		}
+        for (int counter = 0; counter < SIZE; counter++) {
+            String testString = "Test + " + counter;
+            testList.add(testString);
+            int numberOfBucket = getNumberOfBucket(counter);
+            AtomicReferenceArray<String> bucket = memory.get(numberOfBucket);
+            Assert.assertEquals(getBucketSize(numberOfBucket), bucket.length());
+            Assert.assertEquals(testString, bucket.get(getIndexInBucket(counter)));
+        }
+    }
+
+    @Test
+    public void testAddNull() throws NoSuchFieldException, IllegalAccessException {
+        List<String> testList = new LockFreeList<>();
+        AtomicReferenceArray<AtomicReferenceArray<String>> memory = (AtomicReferenceArray<AtomicReferenceArray<String>>) getValue(testList, "memory");
+        Assert.assertEquals(memory.length(), 32);
+        for (int counter = 0; counter < SIZE; counter++) {
+            String testString = null;
+            testList.add(testString);
+            int numberOfBucket = getNumberOfBucket(counter);
+            AtomicReferenceArray<String> bucket = memory.get(numberOfBucket);
+            Assert.assertEquals(getBucketSize(numberOfBucket), bucket.length());
+            Assert.assertEquals(testString, bucket.get(getIndexInBucket(counter)));
+        }
+    }
+
+    @Test
+    public void testAddNullAndNotNull() throws NoSuchFieldException, IllegalAccessException {
+        List<String> testList = new LockFreeList<>();
+        AtomicReferenceArray<AtomicReferenceArray<String>> memory = (AtomicReferenceArray<AtomicReferenceArray<String>>) getValue(testList, "memory");
+        Assert.assertEquals(memory.length(), 32);
+        for (int counter = 0; counter < SIZE; counter++) {
+            String testString = counter % 2 == 0 ? null : "testString" + counter;
+            testList.add(testString);
+            int numberOfBucket = getNumberOfBucket(counter);
+            AtomicReferenceArray<String> bucket = memory.get(numberOfBucket);
+            Assert.assertEquals(getBucketSize(numberOfBucket), bucket.length());
+            Assert.assertEquals(testString, bucket.get(getIndexInBucket(counter)));
+        }
+    }
+
+    @Test
+    public void testSize() throws NoSuchFieldException, IllegalAccessException {
+        List<String> testList = new LockFreeList<>();
+        for (int counter = 0; counter < SIZE; counter++) {
+            String testString = "testString" + counter;
+            Assert.assertEquals(counter, testList.size());
+            testList.add(testString);
+            Assert.assertEquals(counter + 1, testList.size());
+            testList.set(counter, testString);
+            Assert.assertEquals(counter + 1, testList.size());
+        }
+        Assert.assertEquals(SIZE, testList.size());
+    }
+
+    private int getBucketSize(int numberOfBucket) {
+        return 2 << numberOfBucket;
+    }
+
+    private int getNumberOfBucket(int position) {
+        int pos = position + 2;
+        return (Integer.numberOfTrailingZeros(Integer.highestOneBit(pos)) - 1);
+    }
+
+    private int getIndexInBucket(int position) {
+        int pos = position + 2;
+        return (Integer.highestOneBit(pos) ^ pos);
     }
 
     private Object getValue(Object obj, String value) throws NoSuchFieldException, IllegalAccessException {
